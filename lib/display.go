@@ -135,6 +135,13 @@ Signed Certificate Timestamp:
 	Timestamp: {{.Timestamp | formatTime}}
 	Signature: {{.SignatureAlgorithm | highlightAlgorithm}}
 {{- end}}
+{{- if .Extensions}}
+Custom Extensions:
+{{- range .Extensions}}
+	{{.OID}}{{if .Name}} ({{.Name}}){{end}}{{if .Critical}} [critical]{{end}}:
+		{{.Value}}
+{{- end}}
+{{- end}}
 {{- if .Warnings}}
 Lints:
 {{- range .Warnings}}

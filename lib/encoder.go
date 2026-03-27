@@ -20,6 +20,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -206,6 +207,7 @@ type simpleCertificate struct {
 	URINames              []string            `json:"uri_names,omitempty"`
 	EmailAddresses        []string            `json:"email_addresses,omitempty"`
 	SCTList               []*simpleSCT        `json:"sct_list,omitempty"`
+	Extensions            []simpleExtension   `json:"extensions,omitempty"`
 	Warnings              []string            `json:"lints,omitempty"`
 	PEM                   string              `json:"pem,omitempty"`
 
@@ -231,6 +233,41 @@ type simpleKeyUsage x509.KeyUsage
 type simpleExtKeyUsage x509.ExtKeyUsage
 
 type simpleSigAlg x509.SignatureAlgorithm
+
+// simpleExtension represents a raw X.509 certificate extension.
+type simpleExtension struct {
+	OID      string `json:"oid"`
+	Name     string `json:"name,omitempty"`
+	Critical bool   `json:"critical,omitempty"`
+	Value    string `json:"value"`
+}
+
+// knownExtensionOIDs is the set of extension OIDs already surfaced through
+// dedicated fields on simpleCertificate. Extensions with these OIDs are
+// excluded from the generic Extensions list to avoid duplication.
+var knownExtensionOIDs = map[string]bool{
+	"2.5.29.14":                true, // Subject Key Identifier
+	"2.5.29.15":                true, // Key Usage
+	"2.5.29.17":                true, // Subject Alternative Name
+	"2.5.29.18":                true, // Issuer Alternative Name
+	"2.5.29.19":                true, // Basic Constraints
+	"2.5.29.30":                true, // Name Constraints
+	"2.5.29.35":                true, // Authority Key Identifier
+	"2.5.29.37":                true, // Extended Key Usage
+	"1.3.6.1.5.5.7.1.1":       true, // Authority Information Access (OCSP/Issuer URLs)
+	"1.3.6.1.4.1.11129.2.4.2": true, // Certificate Transparency SCT List
+}
+
+// formatExtensionValue returns a human-readable representation of a raw DER
+// extension value. It attempts to decode common ASN.1 string types; if that
+// fails it falls back to a hex string.
+func formatExtensionValue(data []byte) string {
+	var s string
+	if rest, err := asn1.Unmarshal(data, &s); err == nil && len(rest) == 0 {
+		return s
+	}
+	return hex.EncodeToString(data)
+}
 
 func createSimpleCertificate(name string, cert *x509.Certificate) simpleCertificate {
 	out := simpleCertificate{
@@ -296,6 +333,18 @@ func createSimpleCertificate(name string, cert *x509.Certificate) simpleCertific
 		simpleEku = append(simpleEku, simpleExtKeyUsage(eku))
 	}
 	out.ExtKeyUsage = simpleEku
+
+	for _, ext := range cert.Extensions {
+		if knownExtensionOIDs[ext.Id.String()] {
+			continue
+		}
+		out.Extensions = append(out.Extensions, simpleExtension{
+			OID:      ext.Id.String(),
+			Name:     describeExtensionOid(ext.Id),
+			Critical: ext.Critical,
+			Value:    formatExtensionValue(ext.Value),
+		})
+	}
 
 	return out
 }
